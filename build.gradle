@@ -90,7 +90,7 @@ repositories {
 
 dependencies {
     compileOnly 'io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT'
-    compileOnly 'net.luckperms:api:5.4'
+    compileOnly 'net.luckperms:api:5.5'
     compileOnly('com.github.MilkBowl:VaultAPI:1.7') {
         transitive = false
     }
