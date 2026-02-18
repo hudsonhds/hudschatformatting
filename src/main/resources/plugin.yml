@@ -1,0 +1,18 @@
+main: com.crimsonwarpedcraft.hudschatformatting.HudsChatFormattingPlugin
+name: hudschatformatting
+version: "${VERSION}"
+api-version: "1.21"
+author: AUTHOR
+description: hudschatformatting - configurable chat formatting with plugin placeholders.
+softdepend:
+  - LuckPerms
+  - Vault
+  - PlaceholderAPI
+  - Multiverse-Core
+permissions:
+  hudschatformatting.chat.color:
+    description: Allows use of & color codes in chat.
+    default: false
+  hudschatformatting.chat.format:
+    description: Allows use of & formatting codes in chat.
+    default: false

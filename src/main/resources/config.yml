@@ -1,0 +1,60 @@
+chat:
+  # Main chat format template.
+  # Placeholders:
+  # {prefix}       LuckPerms prefix (if LuckPerms is installed and configured)
+  # {player}       Player username
+  # {display_name} Player display name
+  # {world}        Current world name of the player sending the message
+  # {world_alias}  Multiverse world alias when available (falls back to world name)
+  # {x} {y} {z}    Player block coordinates
+  # {time}         Server time string using chat.time-zone + chat.time-pattern
+  # {world_time_24} World time in 24-hour format (example: 13:05)
+  # {world_time_12} World time in 12-hour format (example: 1:05 PM)
+  # {online_players} Current online player count
+  # {max_players}    Server max player slots
+  # {balance}        Vault balance with 2 decimals (or N/A if Vault/economy is missing)
+  # {balance_formatted} Vault balance using economy plugin formatting
+  # {message}      The player's message text (required, or it is appended automatically)
+  # Any PlaceholderAPI placeholders also work when enabled (example: %player_ping%)
+  #
+  # Example formats:
+  # "&8[{time}] &7[{world_alias}] {prefix}&f{player} &8(&6${balance}&8) &7>> {message}"
+  # "&8[{world_time_12}] &b{online_players}/{max_players} &8| {prefix}&f{display_name}&7: {message}"
+  # "&8[{time}] &7[%multiverse_world_alias%] &f{player}&7: {message}"
+  format: "&8[{time}] &7[{world}] {prefix}&f{player}&7: {message}"
+
+  # Optional message wrapper applied around the player's actual message.
+  # Keep {message} in this string. If omitted, it is appended automatically.
+  # Example:
+  # "&8[&f{world_time_24}&8] &f{message}"
+  message-format: "&f{message}"
+
+  # If true, legacy color/format codes (&a, &l, etc.) in chat.format are parsed.
+  enable-legacy-codes-in-format: true
+
+  # If true, legacy color/format codes in chat.message-format are parsed.
+  enable-legacy-codes-in-message-format: true
+
+  # If true and PlaceholderAPI is installed, %placeholders% are parsed in
+  # chat.format and chat.message-format.
+  enable-placeholderapi: true
+
+  # Time display options for {time}.
+  # Use "server" for server local time, or a Java ZoneId like "America/New_York" or "UTC".
+  time-zone: "server"
+
+  # Java DateTimeFormatter pattern used by {time}.
+  # Common examples:
+  # "HH:mm:ss" -> 23:15:42
+  # "h:mm a"   -> 11:15 PM
+  # "yyyy-MM-dd HH:mm" -> 2026-02-17 23:15
+  time-pattern: "HH:mm:ss"
+
+permissions:
+  # Players with this permission can use color codes in chat messages:
+  # &0-&9, &a-&f, and &x hex format.
+  chat-color: "hudschatformatting.chat.color"
+
+  # Players with this permission can use format codes in chat messages:
+  # &k, &l, &m, &n, &o, and &r reset.
+  chat-format: "hudschatformatting.chat.format"
