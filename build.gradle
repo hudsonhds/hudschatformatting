@@ -19,18 +19,15 @@ static def getTime() {
 // Set version to version property if supplied
 String shortVersion = null
 if (hasProperty('ver')) {
-    if (ver.charAt(0) == "v") {
-        shortVersion = ver.substring(1).toUpperCase()
-    } else {
-        shortVersion = ver.toUpperCase()
-    }
+    shortVersion = ver.toString()
 }
 
 // If the tag includes "-RC-" or no tag is supplied, append "-SNAPSHOT"
 int rcIdx
+String normalizedVersion = shortVersion == null ? null : shortVersion.toUpperCase()
 if (shortVersion == null || shortVersion == "") {
     version = getTime() + "-SNAPSHOT"
-} else if ((rcIdx = shortVersion.indexOf("-RC-")) != -1) {
+} else if ((rcIdx = normalizedVersion.indexOf("-RC-")) != -1) {
     version = shortVersion.substring(0, rcIdx) + "-SNAPSHOT"
 } else {
     version = shortVersion
@@ -142,6 +139,8 @@ tasks.withType(SpotBugsTask).configureEach {
 }
 
 shadowJar {
+    archiveBaseName.set(rootProject.name)
+    archiveVersion.set(project.version.toString())
     archiveClassifier.set('')
     relocate 'io.papermc.lib', 'shadow.io.papermc.paperlib'
     minimize()
