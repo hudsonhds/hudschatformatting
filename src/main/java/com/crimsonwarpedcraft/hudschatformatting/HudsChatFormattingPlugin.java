@@ -1,6 +1,7 @@
 package com.crimsonwarpedcraft.hudschatformatting;
 
 import io.papermc.lib.PaperLib;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -8,6 +9,7 @@ import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
 import net.milkbowl.vault.chat.Chat;
 import net.milkbowl.vault.economy.Economy;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -103,24 +105,31 @@ public class HudsChatFormattingPlugin extends JavaPlugin {
     final YamlConfiguration defaults;
     try (InputStreamReader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
       defaults = YamlConfiguration.loadConfiguration(reader);
-    } catch (Exception ex) {
+    } catch (IOException ex) {
       getLogger().warning("Failed to read bundled config.yml; skipping config update.");
       return;
     }
 
     final FileConfiguration current = getConfig();
-    boolean changed = false;
-    for (final String path : defaults.getKeys(true)) {
-      if (defaults.isConfigurationSection(path) || current.isSet(path)) {
+    current.setDefaults(defaults);
+    applyDefaultsRecursively(current, defaults);
+  }
+
+  private void applyDefaultsRecursively(
+      final FileConfiguration current, final ConfigurationSection defaultsSection) {
+    for (final String key : defaultsSection.getKeys(false)) {
+      final String path = defaultsSection.getCurrentPath() == null
+          ? key
+          : defaultsSection.getCurrentPath() + "." + key;
+      final Object defaultValue = defaultsSection.get(key);
+      if (defaultValue instanceof ConfigurationSection nestedDefaults) {
+        applyDefaultsRecursively(current, nestedDefaults);
         continue;
       }
-      current.set(path, defaults.get(path));
-      changed = true;
-    }
 
-    if (changed) {
-      saveConfig();
-      getLogger().info("Config updated with missing default settings.");
+      if (!current.isSet(path)) {
+        current.set(path, defaultValue);
+      }
     }
   }
 }
