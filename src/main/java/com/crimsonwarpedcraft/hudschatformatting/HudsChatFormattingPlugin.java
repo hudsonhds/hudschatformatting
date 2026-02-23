@@ -3,6 +3,7 @@ package com.crimsonwarpedcraft.hudschatformatting;
 import io.papermc.lib.PaperLib;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
+import net.milkbowl.vault.chat.Chat;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -28,6 +29,7 @@ public class HudsChatFormattingPlugin extends JavaPlugin {
         new ChatFormatListener(
             this,
             getLuckPerms(),
+            getVaultChat(),
             getVaultEconomy(),
             this.placeholderApiEnabled,
             this.multiverseEnabled),
@@ -56,6 +58,21 @@ public class HudsChatFormattingPlugin extends JavaPlugin {
         getServer().getServicesManager().getRegistration(Economy.class);
     if (provider == null) {
       getLogger().warning("Vault is installed but no economy provider is registered.");
+      return null;
+    }
+
+    return provider.getProvider();
+  }
+
+  private Chat getVaultChat() {
+    if (!getServer().getPluginManager().isPluginEnabled("Vault")) {
+      return null;
+    }
+
+    final RegisteredServiceProvider<Chat> provider =
+        getServer().getServicesManager().getRegistration(Chat.class);
+    if (provider == null) {
+      getLogger().warning("Vault is installed but no chat provider is registered.");
       return null;
     }
 

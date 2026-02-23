@@ -1,7 +1,8 @@
 chat:
   # Main chat format template.
   # Placeholders:
-  # {prefix}       LuckPerms prefix (if LuckPerms is installed and configured)
+  # {prefix}       Prefix from LuckPerms, or from a Vault chat provider fallback
+  #                (for example GroupManager integrations via Vault)
   # {player}       Player username
   # {display_name} Player display name
   # {world}        World label from chat.world-name-formats (falls back to world name)
@@ -49,6 +50,43 @@ chat:
   # chat.format and chat.message-format.
   enable-placeholderapi: true
 
+  filter:
+    # Enable chat filtering.
+    enabled: true
+
+    # Matching behavior for blocked keywords and replacement rules.
+    case-sensitive: false
+    whole-word-only: false
+
+    # If true, replacements are applied first and the blocked-word check runs
+    # against the replaced message text. If false, block check runs on original text first.
+    apply-replacements-before-block-check: true
+
+    # Messages containing any of these entries are blocked and not broadcast.
+    # Use plain text entries (contains/whole-word behavior above), or regex rules
+    # with the prefix "regex:".
+    # Examples:
+    # - "badword"
+    # - "very bad phrase"
+    # - "regex:\\b(?:foo|bar)\\d+\\b"
+    blocked-keywords: []
+
+    # Replace words/phrases before message formatting.
+    # Keys are the match rule, values are replacement text.
+    # Keys also support regex with the "regex:" prefix.
+    # Examples:
+    # replacements:
+    #   "heck": "h*ck"
+    #   "foo bar": "friendly phrase"
+    #   "regex:\\bnoob\\b": "new player"
+    replacements:
+      "shit": "crap"
+      "frick": "flowers"
+
+    # Notify the player when their message is blocked.
+    send-blocked-message: true
+    blocked-message: "&cYour message was blocked by chat filters."
+
   # Time display options for {time}.
   # Use "server" for server local time, or a Java ZoneId like "America/New_York" or "UTC".
   time-zone: "server"
@@ -68,3 +106,7 @@ permissions:
   # Players with this permission can use format codes in chat messages:
   # &k, &l, &m, &n, &o, and &r reset.
   chat-format: "hudschatformatting.chat.format"
+
+  # Players with this permission bypass the chat filter system.
+  # This is permission-based only (not automatic for OP), so grant explicitly if needed.
+  chat-filter-bypass: "hudschatformatting.chat.filter.bypass"

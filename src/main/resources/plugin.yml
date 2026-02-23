@@ -7,6 +7,7 @@ description: hudschatformatting - configurable chat formatting with plugin place
 softdepend:
   - LuckPerms
   - Vault
+  - GroupManager
   - PlaceholderAPI
   - Multiverse-Core
 permissions:
@@ -15,4 +16,7 @@ permissions:
     default: false
   hudschatformatting.chat.format:
     description: Allows use of & formatting codes in chat.
+    default: false
+  hudschatformatting.chat.filter.bypass:
+    description: Bypasses configurable chat filters.
     default: false
