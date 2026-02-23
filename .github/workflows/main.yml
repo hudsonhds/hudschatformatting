@@ -67,7 +67,7 @@ jobs:
           java-version: 21
 
       - name: Publish with Gradle
-        run: ./gradlew -Pver="1.0.0-RC-1" release
+        run: ./gradlew -Pver="1.0.1-RC-1" release
 
       - name: Upload build results
         uses: actions/upload-artifact@v6
