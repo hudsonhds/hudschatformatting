@@ -286,11 +286,12 @@ public final class ChatFormatListener implements Listener {
     final String onlinePlayers = Integer.toString(
         this.plugin.getServer().getOnlinePlayers().size());
     final String maxPlayers = Integer.toString(this.plugin.getServer().getMaxPlayers());
+    final String formattedWorldName = getConfiguredWorldName(player);
     String output = input
         .replace("{prefix}", prefix)
         .replace("{player}", player.getName())
         .replace("{display_name}", displayName)
-        .replace("{world}", player.getWorld().getName())
+        .replace("{world}", formattedWorldName)
         .replace("{world_alias}", getMultiverseWorldAlias(player))
         .replace("{x}", Integer.toString(player.getLocation().getBlockX()))
         .replace("{y}", Integer.toString(player.getLocation().getBlockY()))
@@ -308,6 +309,23 @@ public final class ChatFormatListener implements Listener {
       output = PlaceholderAPI.setPlaceholders(player, output);
     }
     return output;
+  }
+
+  private String getConfiguredWorldName(final Player player) {
+    final FileConfiguration config = this.plugin.getConfig();
+    final String worldName = player.getWorld().getName();
+    final String worldPath = "chat.world-name-formats.worlds." + worldName;
+    final String configuredWorldName = config.getString(worldPath);
+    if (configuredWorldName != null && !configuredWorldName.isBlank()) {
+      return configuredWorldName;
+    }
+
+    final String defaultWorldName = config.getString("chat.world-name-formats.default");
+    if (defaultWorldName != null && !defaultWorldName.isBlank()) {
+      return defaultWorldName.replace("{world}", worldName);
+    }
+
+    return worldName;
   }
 
   private String getMultiverseWorldAlias(final Player player) {

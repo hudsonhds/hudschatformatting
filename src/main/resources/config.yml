@@ -4,7 +4,7 @@ chat:
   # {prefix}       LuckPerms prefix (if LuckPerms is installed and configured)
   # {player}       Player username
   # {display_name} Player display name
-  # {world}        Current world name of the player sending the message
+  # {world}        World label from chat.world-name-formats (falls back to world name)
   # {world_alias}  Multiverse world alias when available (falls back to world name)
   # {x} {y} {z}    Player block coordinates
   # {time}         Server time string using chat.time-zone + chat.time-pattern
@@ -22,6 +22,16 @@ chat:
   # "&8[{world_time_12}] &b{online_players}/{max_players} &8| {prefix}&f{display_name}&7: {message}"
   # "&8[{time}] &7[%multiverse_world_alias%] &f{player}&7: {message}"
   format: "&8[{time}] &7[{world}] {prefix}&f{player}&7: {message}"
+
+  # Configure custom world labels for {world}.
+  # `default` is used when the world has no specific entry.
+  # You can use {world} in `default` to include the original world name.
+  world-name-formats:
+    default: "&7{world}"
+    worlds:
+      world: "&aOverworld"
+      world_nether: "&cNether"
+      world_the_end: "&5The End"
 
   # Optional message wrapper applied around the player's actual message.
   # Keep {message} in this string. If omitted, it is appended automatically.
