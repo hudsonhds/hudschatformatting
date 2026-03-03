@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -22,12 +23,21 @@ import net.luckperms.api.query.QueryOptions;
 import net.milkbowl.vault.chat.Chat;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.World;
+import org.bukkit.advancement.Advancement;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerAdvancementDoneEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.projectiles.ProjectileSource;
 
 /**
  * Handles all chat formatting for the plugin.
@@ -38,6 +48,11 @@ public final class ChatFormatListener implements Listener {
 
   private static final String MESSAGE_PLACEHOLDER = "{message}";
   private static final String DEFAULT_FORMAT = "&7[{time}] {prefix}&f{player}&7: {message}";
+  private static final String VANILLA_TEMPLATE_TOKEN = "{vanilla}";
+  private static final String DEFAULT_JOIN_MESSAGE = VANILLA_TEMPLATE_TOKEN;
+  private static final String DEFAULT_LEAVE_MESSAGE = VANILLA_TEMPLATE_TOKEN;
+  private static final String DEFAULT_DEATH_MESSAGE = VANILLA_TEMPLATE_TOKEN;
+  private static final String DEFAULT_ADVANCEMENT_MESSAGE = VANILLA_TEMPLATE_TOKEN;
   private static final char SECTION_SIGN = (char) 167;
   private static final String BALANCE_UNAVAILABLE = "N/A";
   private static final Pattern HEX_AMPERSAND_PATTERN =
@@ -120,6 +135,141 @@ public final class ChatFormatListener implements Listener {
     event.renderer((source, sourceDisplayName, message, viewer) -> beforeComponent
         .append(buildPlayerMessage(player, message, prefix))
         .append(afterComponent));
+  }
+
+  /**
+   * Applies configurable join messages (global or per-player override).
+   *
+   * @param event the join event
+   */
+  @EventHandler(priority = EventPriority.HIGH)
+  public void onPlayerJoin(final PlayerJoinEvent event) {
+    final Player player = event.getPlayer();
+    final Component vanillaMessage = event.joinMessage();
+    if (!isMessageEnabled("messages.join.enabled", true)) {
+      event.joinMessage(null);
+      return;
+    }
+    if (shouldSuppressPlayerMessage("join", player)) {
+      event.joinMessage(null);
+      return;
+    }
+
+    final String template = getJoinOrLeaveTemplate(player, "join", DEFAULT_JOIN_MESSAGE);
+    if (isVanillaTemplate(template)) {
+      event.joinMessage(vanillaMessage);
+      return;
+    }
+
+    final String rendered = applyGeneralPlaceholders(player, template, "")
+        .replace("{event}", "join");
+    event.joinMessage(AMPERSAND_SERIALIZER.deserialize(rendered));
+  }
+
+  /**
+   * Applies configurable quit messages (global or per-player override).
+   *
+   * @param event the quit event
+   */
+  @EventHandler(priority = EventPriority.HIGH)
+  public void onPlayerQuit(final PlayerQuitEvent event) {
+    final Player player = event.getPlayer();
+    final Component vanillaMessage = event.quitMessage();
+    if (!isMessageEnabled("messages.leave.enabled", true)) {
+      event.quitMessage(null);
+      return;
+    }
+    if (shouldSuppressPlayerMessage("leave", player)) {
+      event.quitMessage(null);
+      return;
+    }
+
+    final String template = getJoinOrLeaveTemplate(player, "leave", DEFAULT_LEAVE_MESSAGE);
+    if (isVanillaTemplate(template)) {
+      event.quitMessage(vanillaMessage);
+      return;
+    }
+
+    final String rendered = applyGeneralPlaceholders(player, template, "")
+        .replace("{event}", "leave");
+    event.quitMessage(AMPERSAND_SERIALIZER.deserialize(rendered));
+  }
+
+  /**
+   * Applies configurable death messages by damage cause.
+   *
+   * @param event the death event
+   */
+  @EventHandler(priority = EventPriority.HIGH)
+  public void onPlayerDeath(final PlayerDeathEvent event) {
+    final Component baseDeathMessage = event.deathMessage();
+    if (!isMessageEnabled("messages.death.enabled", true)) {
+      event.deathMessage(null);
+      return;
+    }
+
+    final Player player = event.getEntity();
+    if (shouldSuppressPlayerMessage("death", player)) {
+      event.deathMessage(null);
+      return;
+    }
+    final DeathContext deathContext = getDeathContext(player);
+    final String template = getDeathTemplate(deathContext);
+    if (isVanillaTemplate(template)) {
+      event.deathMessage(baseDeathMessage);
+      return;
+    }
+
+    final String defaultMessage;
+    if (baseDeathMessage == null) {
+      defaultMessage = player.getName() + " died.";
+    } else {
+      defaultMessage = PLAIN_TEXT_SERIALIZER.serialize(baseDeathMessage);
+    }
+    final String rendered = applyGeneralPlaceholders(player, template, "")
+        .replace("{event}", "death")
+        .replace("{death_message}", defaultMessage)
+        .replace("{death_cause}", deathContext.causeKey())
+        .replace("{killer}", deathContext.killerName())
+        .replace("{killer_type}", deathContext.killerTypeKey());
+    event.deathMessage(AMPERSAND_SERIALIZER.deserialize(rendered));
+  }
+
+  /**
+   * Applies configurable advancement announcements keyed by advancement id.
+   *
+   * @param event the advancement completion event
+   */
+  @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+  public void onPlayerAdvancementDone(final PlayerAdvancementDoneEvent event) {
+    final Component baseMessage = event.message();
+    if (!isMessageEnabled("messages.advancement.enabled", true)) {
+      event.message(null);
+      return;
+    }
+
+    final Player player = event.getPlayer();
+    if (shouldSuppressPlayerMessage("advancement", player)) {
+      event.message(null);
+      return;
+    }
+    final Advancement advancement = event.getAdvancement();
+    final String key = advancement.getKey().toString();
+    final String template = getAdvancementTemplate(key);
+    if (isVanillaTemplate(template)) {
+      event.message(baseMessage);
+      return;
+    }
+
+    final String vanillaMessage = baseMessage == null
+        ? key
+        : PLAIN_TEXT_SERIALIZER.serialize(baseMessage);
+    final String rendered = applyGeneralPlaceholders(player, template, "")
+        .replace("{event}", "advancement")
+        .replace("{advancement_key}", key)
+        .replace("{advancement_message}", vanillaMessage)
+        .replace("{advancement_title}", getAdvancementTitle(event));
+    event.message(AMPERSAND_SERIALIZER.deserialize(rendered));
   }
 
   private Component buildPlayerMessage(
@@ -256,6 +406,119 @@ public final class ChatFormatListener implements Listener {
     return getVaultPrefix(player);
   }
 
+  private String getJoinOrLeaveTemplate(
+      final Player player, final String type, final String fallback) {
+    final FileConfiguration config = this.plugin.getConfig();
+    final String playerPath = "messages." + type + ".per-player." + player.getName();
+    final String playerSpecific = config.getString(playerPath);
+    if (playerSpecific != null && !playerSpecific.isBlank()) {
+      return playerSpecific;
+    }
+
+    final String uuidPath = "messages." + type + ".per-player-uuid." + player.getUniqueId();
+    final String uuidSpecific = config.getString(uuidPath);
+    if (uuidSpecific != null && !uuidSpecific.isBlank()) {
+      return uuidSpecific;
+    }
+
+    return getConfigString(config, "messages." + type + ".default", fallback);
+  }
+
+  private String getDeathTemplate(final DeathContext deathContext) {
+    final FileConfiguration config = this.plugin.getConfig();
+    if (!deathContext.killerTypeKey().isBlank()) {
+      final String mobPath = "messages.death.by-mob." + deathContext.killerTypeKey();
+      final String mobTemplate = config.getString(mobPath);
+      if (mobTemplate != null && !mobTemplate.isBlank()) {
+        return mobTemplate;
+      }
+    }
+
+    final String exactPath = "messages.death.by-cause." + deathContext.causeKey();
+    final String exactTemplate = config.getString(exactPath);
+    if (exactTemplate != null && !exactTemplate.isBlank()) {
+      return exactTemplate;
+    }
+
+    return getConfigString(config, "messages.death.default", DEFAULT_DEATH_MESSAGE);
+  }
+
+  private String getAdvancementTemplate(final String advancementKey) {
+    final FileConfiguration config = this.plugin.getConfig();
+    final String exactPath = "messages.advancement.by-key." + advancementKey;
+    final String exactTemplate = config.getString(exactPath);
+    if (exactTemplate != null && !exactTemplate.isBlank()) {
+      return exactTemplate;
+    }
+
+    return getConfigString(
+        config, "messages.advancement.default", DEFAULT_ADVANCEMENT_MESSAGE);
+  }
+
+  private String getDeathCauseKey(final Player player) {
+    final EntityDamageEvent causeEvent = player.getLastDamageCause();
+    if (causeEvent == null || causeEvent.getCause() == null) {
+      return "UNKNOWN";
+    }
+    return causeEvent.getCause().name();
+  }
+
+  private DeathContext getDeathContext(final Player player) {
+    final String causeKey = getDeathCauseKey(player);
+    final EntityDamageEvent causeEvent = player.getLastDamageCause();
+    if (!(causeEvent instanceof EntityDamageByEntityEvent entityDamage)) {
+      return new DeathContext(causeKey, "", "");
+    }
+
+    final org.bukkit.entity.Entity killer = resolveDamager(entityDamage.getDamager());
+    if (killer == null) {
+      return new DeathContext(causeKey, "", "");
+    }
+
+    final String killerType = killer.getType().name();
+    final Component customName = killer.customName();
+    final String killerName = customName == null
+        ? killerType
+        : PLAIN_TEXT_SERIALIZER.serialize(customName);
+    return new DeathContext(causeKey, killerType, killerName);
+  }
+
+  private org.bukkit.entity.Entity resolveDamager(final org.bukkit.entity.Entity damager) {
+    if (damager instanceof org.bukkit.entity.Projectile projectile) {
+      final ProjectileSource shooter = projectile.getShooter();
+      if (shooter instanceof org.bukkit.entity.Entity shooterEntity) {
+        return shooterEntity;
+      }
+    }
+    return damager;
+  }
+
+  private String getAdvancementTitle(final PlayerAdvancementDoneEvent event) {
+    final Component baseMessage = event.message();
+    if (baseMessage == null) {
+      return event.getAdvancement().getKey().toString();
+    }
+
+    final String fullText = PLAIN_TEXT_SERIALIZER.serialize(baseMessage).trim();
+    if (fullText.isBlank()) {
+      return event.getAdvancement().getKey().toString();
+    }
+
+    final String playerName = event.getPlayer().getName();
+    final int playerStart = fullText.indexOf(playerName);
+    if (playerStart >= 0) {
+      final int playerEnd = playerStart + playerName.length();
+      if (playerEnd < fullText.length()) {
+        final String trailing = fullText.substring(playerEnd).trim();
+        if (!trailing.isBlank()) {
+          return trailing;
+        }
+      }
+    }
+
+    return fullText;
+  }
+
   private String getLuckPermsPrefix(final Player player) {
     if (this.luckPerms == null) {
       return "";
@@ -322,6 +585,7 @@ public final class ChatFormatListener implements Listener {
 
   private String applyGeneralPlaceholders(
       final Player player, final String input, final String prefix) {
+    final String resolvedPlayerName = getResolvedPlayerPlaceholder(player);
     final String displayName = normalizeLegacyCodes(
         AMPERSAND_SERIALIZER.serialize(player.displayName()));
     final String onlinePlayers = Integer.toString(
@@ -331,7 +595,8 @@ public final class ChatFormatListener implements Listener {
     final String normalizedPrefix = normalizeLegacyCodes(prefix);
     String output = input
         .replace("{prefix}", normalizedPrefix)
-        .replace("{player}", player.getName())
+        .replace("{player}", resolvedPlayerName)
+        .replace("{real_player}", player.getName())
         .replace("{display_name}", displayName)
         .replace("{world}", formattedWorldName)
         .replace("{world_alias}", getMultiverseWorldAlias(player))
@@ -351,6 +616,176 @@ public final class ChatFormatListener implements Listener {
       output = PlaceholderAPI.setPlaceholders(player, output);
     }
     return output;
+  }
+
+  private boolean isMessageEnabled(final String path, final boolean fallback) {
+    final FileConfiguration config = this.plugin.getConfig();
+    return config.getBoolean(path, fallback);
+  }
+
+  private boolean shouldSuppressPlayerMessage(final String type, final Player player) {
+    if (isPlayerVanished(player)) {
+      return true;
+    }
+
+    final FileConfiguration config = this.plugin.getConfig();
+    final List<String> disabledNames = config.getStringList(
+        "messages." + type + ".disabled-players");
+    if (containsIgnoreCase(disabledNames, player.getName())) {
+      return true;
+    }
+
+    final List<String> disabledUuids = config.getStringList(
+        "messages." + type + ".disabled-player-uuids");
+    final String uuid = player.getUniqueId().toString();
+    return containsIgnoreCase(disabledUuids, uuid);
+  }
+
+  private boolean isPlayerVanished(final Player player) {
+    if (!this.plugin.getConfig().getBoolean("integrations.vanish.hide-messages", true)) {
+      return false;
+    }
+
+    if (isVanishedViaSuperVanishApi(player)) {
+      return true;
+    }
+    if (isVanishedViaEssentials(player)) {
+      return true;
+    }
+
+    final List<String> metadataKeys = this.plugin.getConfig().getStringList(
+        "integrations.vanish.metadata-keys");
+    for (final String key : metadataKeys) {
+      if (key == null || key.isBlank()) {
+        continue;
+      }
+
+      if (!player.hasMetadata(key)) {
+        continue;
+      }
+
+      for (final MetadataValue value : player.getMetadata(key)) {
+        if (value.asBoolean()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private boolean isVanishedViaSuperVanishApi(final Player player) {
+    final boolean superVanish = this.plugin.getServer().getPluginManager()
+        .isPluginEnabled("SuperVanish");
+    final boolean premiumVanish = this.plugin.getServer().getPluginManager()
+        .isPluginEnabled("PremiumVanish");
+    if (!superVanish && !premiumVanish) {
+      return false;
+    }
+
+    try {
+      final Class<?> vanishApi = Class.forName("de.myzelyam.api.vanish.VanishAPI");
+      final java.lang.reflect.Method method = vanishApi.getMethod("isInvisible", Player.class);
+      final Object result = method.invoke(null, player);
+      return result instanceof Boolean && (Boolean) result;
+    } catch (ReflectiveOperationException ex) {
+      return false;
+    }
+  }
+
+  private boolean isVanishedViaEssentials(final Player player) {
+    if (!this.plugin.getServer().getPluginManager().isPluginEnabled("Essentials")) {
+      return false;
+    }
+
+    final org.bukkit.plugin.Plugin essentials = this.plugin.getServer().getPluginManager()
+        .getPlugin("Essentials");
+    if (essentials == null) {
+      return false;
+    }
+
+    try {
+      Object user = null;
+      try {
+        final java.lang.reflect.Method getUserByUuid = essentials.getClass()
+            .getMethod("getUser", UUID.class);
+        user = getUserByUuid.invoke(essentials, player.getUniqueId());
+      } catch (ReflectiveOperationException ignored) {
+        final java.lang.reflect.Method getUserByName = essentials.getClass()
+            .getMethod("getUser", String.class);
+        user = getUserByName.invoke(essentials, player.getName());
+      }
+
+      if (user == null) {
+        return false;
+      }
+
+      final java.lang.reflect.Method isVanished = user.getClass().getMethod("isVanished");
+      final Object result = isVanished.invoke(user);
+      return result instanceof Boolean && (Boolean) result;
+    } catch (ReflectiveOperationException ex) {
+      return false;
+    }
+  }
+
+  private boolean containsIgnoreCase(final List<String> list, final String value) {
+    for (final String entry : list) {
+      if (entry != null && entry.equalsIgnoreCase(value)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private String getResolvedPlayerPlaceholder(final Player player) {
+    if (!this.plugin.getConfig().getBoolean(
+        "integrations.libsdisguises.use-disguise-name-for-player-placeholder", true)) {
+      return player.getName();
+    }
+
+    if (!this.plugin.getServer().getPluginManager().isPluginEnabled("LibsDisguises")) {
+      return player.getName();
+    }
+
+    try {
+      final Class<?> api = Class.forName("me.libraryaddict.disguise.DisguiseAPI");
+      final java.lang.reflect.Method getDisguise = api.getMethod(
+          "getDisguise", org.bukkit.entity.Entity.class);
+      final Object disguise = getDisguise.invoke(null, player);
+      if (disguise == null) {
+        return player.getName();
+      }
+
+      final String disguiseName = invokeStringMethod(disguise, "getDisguiseName");
+      if (disguiseName != null && !disguiseName.isBlank()) {
+        return disguiseName;
+      }
+
+      final String altName = invokeStringMethod(disguise, "getName");
+      if (altName != null && !altName.isBlank()) {
+        return altName;
+      }
+    } catch (ReflectiveOperationException ex) {
+      return player.getName();
+    }
+
+    return player.getName();
+  }
+
+  private String invokeStringMethod(final Object target, final String methodName) {
+    try {
+      final java.lang.reflect.Method method = target.getClass().getMethod(methodName);
+      final Object value = method.invoke(target);
+      if (value instanceof String) {
+        return (String) value;
+      }
+    } catch (ReflectiveOperationException ex) {
+      return null;
+    }
+    return null;
+  }
+
+  private boolean isVanillaTemplate(final String template) {
+    return template != null && template.trim().equalsIgnoreCase(VANILLA_TEMPLATE_TOKEN);
   }
 
   private String normalizeLegacyCodes(final String input) {
@@ -491,6 +926,8 @@ public final class ChatFormatListener implements Listener {
   }
 
   private record FilterResult(boolean blocked, String message) {}
+
+  private record DeathContext(String causeKey, String killerTypeKey, String killerName) {}
 
   private String getConfiguredWorldName(final Player player) {
     final FileConfiguration config = this.plugin.getConfig();

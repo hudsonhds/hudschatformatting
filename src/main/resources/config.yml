@@ -19,10 +19,10 @@ chat:
   # Any PlaceholderAPI placeholders also work when enabled (example: %player_ping%)
   #
   # Example formats:
-  # "&8[{time}] &7[{world_alias}] {prefix}&f{player} &8(&6${balance}&8) &7>> {message}"
-  # "&8[{world_time_12}] &b{online_players}/{max_players} &8| {prefix}&f{display_name}&7: {message}"
-  # "&8[{time}] &7[%multiverse_world_alias%] &f{player}&7: {message}"
-  format: "&8[{time}] &7[{world}] {prefix}&f{player}&7: {message}"
+  # "&8[{time}&8] &7[{world_alias}&7] {prefix}&f{player} &8(&6${balance}&8) &7>> {message}"
+  # "&8[{world_time_12}&b] &b{online_players}/{max_players} &8| {prefix}&f{display_name}&7: {message}"
+  # "&8[{time}&b] &7[%multiverse_world_alias%&b] &f{player}&7: {message}"
+  format: "&2[{time}&2] &2[{world}&2] {prefix}&f{display_name}&7: {message}"
 
   # Configure custom world labels for {world}.
   # `default` is used when the world has no specific entry.
@@ -69,7 +69,9 @@ chat:
     # - "badword"
     # - "very bad phrase"
     # - "regex:\\b(?:foo|bar)\\d+\\b"
-    blocked-keywords: []
+    blocked-keywords:
+     - "fag"
+     - "fuck"
 
     # Replace words/phrases before message formatting.
     # Keys are the match rule, values are replacement text.
@@ -85,7 +87,7 @@ chat:
 
     # Notify the player when their message is blocked.
     send-blocked-message: true
-    blocked-message: "&cYour message was blocked by chat filters."
+    blocked-message: "&cYour message was blocked by our chat filter."
 
   # Time display options for {time}.
   # Use "server" for server local time, or a Java ZoneId like "America/New_York" or "UTC".
@@ -96,9 +98,88 @@ chat:
   # "HH:mm:ss" -> 23:15:42
   # "h:mm a"   -> 11:15 PM
   # "yyyy-MM-dd HH:mm" -> 2026-02-17 23:15
-  time-pattern: "HH:mm:ss"
+  time-pattern: "h:mm:ss a"
+
+messages:
+  join:
+    enabled: true
+    # Default join announcement.
+    # Placeholders: {player}, {display_name}, {world}, {x}, {y}, {z}, {time}
+    # Special token: "{vanilla}" keeps the exact vanilla announcement.
+    default: "{vanilla}"
+    # Optional overrides by exact player name.
+    # Example:
+    # per-player:
+    #   Notch: "&6Founder joined: {player}"
+    per-player: {}
+    # Optional overrides by UUID string (safer if players can rename).
+    per-player-uuid: {}
+    # Suppress join messages for specific players.
+    disabled-players: []
+    disabled-player-uuids: []
+
+  leave:
+    enabled: true
+    # Default leave announcement.
+    # Placeholders: {player}, {display_name}, {world}, {x}, {y}, {z}, {time}
+    # Special token: "{vanilla}" keeps the exact vanilla announcement.
+    default: "{vanilla}"
+    per-player: {}
+    per-player-uuid: {}
+    # Suppress leave messages for specific players.
+    disabled-players: []
+    disabled-player-uuids: []
+
+  death:
+    enabled: true
+    # Default death message template.
+    # Placeholders: {player}, {death_message}, {death_cause}, {killer},
+    # {killer_type}, {world}, {time}
+    # Special token: "{vanilla}" keeps the exact vanilla death message.
+    default: "{vanilla}"
+    # Override by killer mob/entity type name.
+    # Example keys: ZOMBIE, SKELETON, CREEPER, ENDERMAN
+    # by-mob:
+    #   ZOMBIE: "&2{player} was eaten by a zombie."
+    by-mob: {}
+    # Override by damage cause enum name.
+    # Example keys: ENTITY_ATTACK, LAVA, FALL, VOID, PROJECTILE
+    # by-cause:
+    #   LAVA: "&6{player} tested the lava in {world}."
+    by-cause: {}
+    # Suppress death messages for specific players.
+    disabled-players: []
+    disabled-player-uuids: []
+
+  advancement:
+    enabled: true
+    # Default advancement announcement template.
+    # Placeholders: {player}, {advancement_key}, {advancement_title},
+    # {advancement_message}, {world}, {time}
+    # Special token: "{vanilla}" keeps the exact vanilla advancement message.
+    default: "{vanilla}"
+    # Override by advancement key (namespace:path).
+    # by-key:
+    #   minecraft:story/mine_stone: "&e{player} reached stone age."
+    by-key: {}
+    # Suppress advancement messages for specific players.
+    disabled-players: []
+    disabled-player-uuids: []
+
+integrations:
+  vanish:
+    # If true, join/leave/death/advancement messages are hidden for vanished players.
+    hide-messages: true
+    # Metadata fallback for vanish plugins without a public API.
+    metadata-keys:
+      - "vanished"
+      - "essentials.vanished"
+      - "PremiumVanish.Hidden"
 
 permissions:
+  # Ops always have command access. Non-ops can be granted this permission.
+  admin-command: "hudschatformatting.admin"
+
   # Players with this permission can use color codes in chat messages:
   # &0-&9, &a-&f, and &x hex format.
   chat-color: "hudschatformatting.chat.color"

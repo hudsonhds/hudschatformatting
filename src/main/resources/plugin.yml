@@ -10,6 +10,16 @@ softdepend:
   - GroupManager
   - PlaceholderAPI
   - Multiverse-Core
+  - Essentials
+  - SuperVanish
+  - PremiumVanish
+  - LibsDisguises
+commands:
+  hudschatformatting:
+    description: Admin commands for hudschatformatting.
+    usage: /<command> [reload|filter|messages]
+    aliases:
+      - hcf
 permissions:
   hudschatformatting.chat.color:
     description: Allows use of & color codes in chat.
@@ -19,4 +29,52 @@ permissions:
     default: false
   hudschatformatting.chat.filter.bypass:
     description: Bypasses configurable chat filters.
+    default: false
+  hudschatformatting.admin:
+    description: Base access for hudschatformatting admin commands.
+    default: op
+    children:
+      hudschatformatting.admin.reload: true
+      hudschatformatting.admin.filter.list: true
+      hudschatformatting.admin.filter.add: true
+      hudschatformatting.admin.filter.edit: true
+      hudschatformatting.admin.filter.remove: true
+      hudschatformatting.admin.filter.toggle: true
+      hudschatformatting.admin.messages.list: true
+      hudschatformatting.admin.messages.set: true
+      hudschatformatting.admin.messages.clear: true
+      hudschatformatting.admin.messages.disable: true
+      hudschatformatting.admin.messages.enable: true
+  hudschatformatting.admin.reload:
+    description: Reloads plugin config from disk.
+    default: false
+  hudschatformatting.admin.filter.list:
+    description: Lists configured chat filters.
+    default: false
+  hudschatformatting.admin.filter.add:
+    description: Adds chat filter rules.
+    default: false
+  hudschatformatting.admin.filter.edit:
+    description: Edits existing chat filter rules.
+    default: false
+  hudschatformatting.admin.filter.remove:
+    description: Removes existing chat filter rules.
+    default: false
+  hudschatformatting.admin.filter.toggle:
+    description: Enables or disables chat filtering.
+    default: false
+  hudschatformatting.admin.messages.list:
+    description: Lists join/leave/death/advancement message templates.
+    default: false
+  hudschatformatting.admin.messages.set:
+    description: Sets join/leave/death/advancement message templates.
+    default: false
+  hudschatformatting.admin.messages.clear:
+    description: Clears specific join/leave/death/advancement message overrides.
+    default: false
+  hudschatformatting.admin.messages.disable:
+    description: Disables message broadcasts for specific players.
+    default: false
+  hudschatformatting.admin.messages.enable:
+    description: Re-enables message broadcasts for specific players.
     default: false
