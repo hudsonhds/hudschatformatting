@@ -6,6 +6,7 @@ import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -55,6 +56,12 @@ public final class ChatFormatListener implements Listener {
   private static final String DEFAULT_ADVANCEMENT_MESSAGE = VANILLA_TEMPLATE_TOKEN;
   private static final char SECTION_SIGN = (char) 167;
   private static final String BALANCE_UNAVAILABLE = "N/A";
+  private static final List<String> NICKNAME_PLACEHOLDER_CANDIDATES = List.of(
+      "%hexnicks_nickname%",
+      "%hexnicks_name%",
+      "%hexnicks_displayname%",
+      "%essentials_nickname%",
+      "%cmi_user_nickname%");
   private static final Pattern HEX_AMPERSAND_PATTERN =
       Pattern.compile("(?i)&?#([0-9a-f]{6})");
   private static final LegacyComponentSerializer AMPERSAND_SERIALIZER =
@@ -157,7 +164,12 @@ public final class ChatFormatListener implements Listener {
 
     final String template = getJoinOrLeaveTemplate(player, "join", DEFAULT_JOIN_MESSAGE);
     if (isVanillaTemplate(template)) {
-      event.joinMessage(vanillaMessage);
+      if (!usePrefixedNicknamesInVanillaMessages()) {
+        event.joinMessage(vanillaMessage);
+        return;
+      }
+      event.joinMessage(rewriteVanillaMessage(
+          vanillaMessage, Map.of(player.getName(), getVanillaFormattedName(player))));
       return;
     }
 
@@ -186,7 +198,12 @@ public final class ChatFormatListener implements Listener {
 
     final String template = getJoinOrLeaveTemplate(player, "leave", DEFAULT_LEAVE_MESSAGE);
     if (isVanillaTemplate(template)) {
-      event.quitMessage(vanillaMessage);
+      if (!usePrefixedNicknamesInVanillaMessages()) {
+        event.quitMessage(vanillaMessage);
+        return;
+      }
+      event.quitMessage(rewriteVanillaMessage(
+          vanillaMessage, Map.of(player.getName(), getVanillaFormattedName(player))));
       return;
     }
 
@@ -216,15 +233,26 @@ public final class ChatFormatListener implements Listener {
     final DeathContext deathContext = getDeathContext(player);
     final String template = getDeathTemplate(deathContext);
     if (isVanillaTemplate(template)) {
-      event.deathMessage(baseDeathMessage);
+      if (!usePrefixedNicknamesInVanillaMessages()) {
+        event.deathMessage(baseDeathMessage);
+        return;
+      }
+      event.deathMessage(rewriteVanillaDeathMessage(baseDeathMessage, player, deathContext));
       return;
     }
 
-    final String defaultMessage;
+    String defaultMessage;
     if (baseDeathMessage == null) {
       defaultMessage = player.getName() + " died.";
     } else {
-      defaultMessage = PLAIN_TEXT_SERIALIZER.serialize(baseDeathMessage);
+      defaultMessage = rewritePlainName(
+          PLAIN_TEXT_SERIALIZER.serialize(baseDeathMessage),
+          player.getName(),
+          getVanillaFormattedName(player));
+      defaultMessage = rewritePlainName(
+          defaultMessage,
+          deathContext.killerPlayerName(),
+          deathContext.killerDecoratedName());
     }
     final String rendered = applyGeneralPlaceholders(player, template, "")
         .replace("{event}", "death")
@@ -257,7 +285,12 @@ public final class ChatFormatListener implements Listener {
     final String key = advancement.getKey().toString();
     final String template = getAdvancementTemplate(key);
     if (isVanillaTemplate(template)) {
-      event.message(baseMessage);
+      if (!usePrefixedNicknamesInVanillaMessages()) {
+        event.message(baseMessage);
+        return;
+      }
+      event.message(rewriteVanillaMessage(
+          baseMessage, Map.of(player.getName(), getVanillaFormattedName(player))));
       return;
     }
 
@@ -421,7 +454,7 @@ public final class ChatFormatListener implements Listener {
       return uuidSpecific;
     }
 
-    return getConfigString(config, "messages." + type + ".default", fallback);
+    return getConfiguredMessageFormat(config, "messages." + type, fallback);
   }
 
   private String getDeathTemplate(final DeathContext deathContext) {
@@ -440,7 +473,7 @@ public final class ChatFormatListener implements Listener {
       return exactTemplate;
     }
 
-    return getConfigString(config, "messages.death.default", DEFAULT_DEATH_MESSAGE);
+    return getConfiguredMessageFormat(config, "messages.death", DEFAULT_DEATH_MESSAGE);
   }
 
   private String getAdvancementTemplate(final String advancementKey) {
@@ -451,8 +484,22 @@ public final class ChatFormatListener implements Listener {
       return exactTemplate;
     }
 
-    return getConfigString(
-        config, "messages.advancement.default", DEFAULT_ADVANCEMENT_MESSAGE);
+    return getConfiguredMessageFormat(
+        config, "messages.advancement", DEFAULT_ADVANCEMENT_MESSAGE);
+  }
+
+  private String getConfiguredMessageFormat(
+      final FileConfiguration config, final String basePath, final String fallback) {
+    final String legacyDefault = config.getString(basePath + ".default");
+    if (legacyDefault != null && !legacyDefault.isBlank()) {
+      return legacyDefault;
+    }
+
+    final String format = config.getString(basePath + ".format");
+    if (format != null && !format.isBlank()) {
+      return format;
+    }
+    return fallback;
   }
 
   private String getDeathCauseKey(final Player player) {
@@ -467,12 +514,22 @@ public final class ChatFormatListener implements Listener {
     final String causeKey = getDeathCauseKey(player);
     final EntityDamageEvent causeEvent = player.getLastDamageCause();
     if (!(causeEvent instanceof EntityDamageByEntityEvent entityDamage)) {
-      return new DeathContext(causeKey, "", "");
+      return new DeathContext(causeKey, "", "", "", "");
     }
 
     final org.bukkit.entity.Entity killer = resolveDamager(entityDamage.getDamager());
     if (killer == null) {
-      return new DeathContext(causeKey, "", "");
+      return new DeathContext(causeKey, "", "", "", "");
+    }
+
+    if (killer instanceof Player killerPlayer) {
+      final String decoratedKiller = getVanillaFormattedName(killerPlayer);
+      return new DeathContext(
+          causeKey,
+          "PLAYER",
+          decoratedKiller,
+          killerPlayer.getName(),
+          decoratedKiller);
     }
 
     final String killerType = killer.getType().name();
@@ -480,7 +537,7 @@ public final class ChatFormatListener implements Listener {
     final String killerName = customName == null
         ? killerType
         : PLAIN_TEXT_SERIALIZER.serialize(customName);
-    return new DeathContext(causeKey, killerType, killerName);
+    return new DeathContext(causeKey, killerType, killerName, "", "");
   }
 
   private org.bukkit.entity.Entity resolveDamager(final org.bukkit.entity.Entity damager) {
@@ -585,9 +642,12 @@ public final class ChatFormatListener implements Listener {
 
   private String applyGeneralPlaceholders(
       final Player player, final String input, final String prefix) {
-    final String resolvedPlayerName = getResolvedPlayerPlaceholder(player);
-    final String displayName = normalizeLegacyCodes(
-        AMPERSAND_SERIALIZER.serialize(player.displayName()));
+    String resolvedPlayerName = getResolvedPlayerPlaceholder(player);
+    final String displayName = getResolvedNickname(player);
+    if (resolvedPlayerName.equals(player.getName()) && !displayName.isBlank()) {
+      resolvedPlayerName = displayName;
+    }
+    resolvedPlayerName = normalizeLegacyCodes(resolvedPlayerName);
     final String onlinePlayers = Integer.toString(
         this.plugin.getServer().getOnlinePlayers().size());
     final String maxPlayers = Integer.toString(this.plugin.getServer().getMaxPlayers());
@@ -788,6 +848,110 @@ public final class ChatFormatListener implements Listener {
     return template != null && template.trim().equalsIgnoreCase(VANILLA_TEMPLATE_TOKEN);
   }
 
+  private boolean usePrefixedNicknamesInVanillaMessages() {
+    return this.plugin.getConfig().getBoolean(
+        "messages.use-prefixed-nicknames-in-vanilla", true);
+  }
+
+  private boolean includePrefixInVanillaFormattedNames() {
+    return this.plugin.getConfig().getBoolean(
+        "messages.include-prefix-in-vanilla-names", true);
+  }
+
+  private String getResolvedNickname(final Player player) {
+    final String placeholderNickname = getNicknameFromPlaceholderApi(player);
+    if (!placeholderNickname.isBlank()) {
+      return placeholderNickname;
+    }
+
+    final String displayName = normalizeLegacyCodes(
+        AMPERSAND_SERIALIZER.serialize(player.displayName()));
+    if (!displayName.isBlank()) {
+      return displayName;
+    }
+    return player.getName();
+  }
+
+  private String getNicknameFromPlaceholderApi(final Player player) {
+    if (!this.placeholderApiEnabled
+        || !this.plugin.getConfig().getBoolean("chat.enable-placeholderapi", true)) {
+      return "";
+    }
+
+    for (final String placeholder : NICKNAME_PLACEHOLDER_CANDIDATES) {
+      final String resolved = PlaceholderAPI.setPlaceholders(player, placeholder);
+      if (resolved == null) {
+        continue;
+      }
+
+      final String trimmed = resolved.trim();
+      if (!trimmed.isBlank() && !trimmed.equals(placeholder)) {
+        return normalizeLegacyCodes(trimmed);
+      }
+    }
+    return "";
+  }
+
+  private String getVanillaFormattedName(final Player player) {
+    final String prefix = includePrefixInVanillaFormattedNames()
+        ? normalizeLegacyCodes(getResolvedPrefix(player))
+        : "";
+    final String nickname = normalizeLegacyCodes(getResolvedNickname(player));
+    return prefix + nickname;
+  }
+
+  private Component rewriteVanillaDeathMessage(
+      final Component originalMessage, final Player victim, final DeathContext deathContext) {
+    if (originalMessage == null) {
+      return null;
+    }
+
+    final Map<String, String> replacements = new LinkedHashMap<>();
+    replacements.put(victim.getName(), getVanillaFormattedName(victim));
+    if (!deathContext.killerPlayerName().isBlank()
+        && !deathContext.killerDecoratedName().isBlank()) {
+      replacements.put(deathContext.killerPlayerName(), deathContext.killerDecoratedName());
+    }
+    return rewriteVanillaMessage(originalMessage, replacements);
+  }
+
+  private Component rewriteVanillaMessage(
+      final Component originalMessage, final Map<String, String> replacements) {
+    if (originalMessage == null || replacements.isEmpty()) {
+      return originalMessage;
+    }
+
+    Component rewritten = originalMessage;
+    for (final Map.Entry<String, String> replacement : replacements.entrySet()) {
+      final String rawName = replacement.getKey();
+      final String replacementName = replacement.getValue();
+      if (rawName == null
+          || rawName.isBlank()
+          || replacementName == null
+          || replacementName.isBlank()) {
+        continue;
+      }
+
+      rewritten = rewritten.replaceText(builder -> builder
+          .matchLiteral(rawName)
+          .replacement(AMPERSAND_SERIALIZER.deserialize(replacementName)));
+    }
+    return rewritten;
+  }
+
+  private String rewritePlainName(
+      final String input, final String rawName, final String replacementName) {
+    if (input == null
+        || input.isBlank()
+        || rawName == null
+        || rawName.isBlank()
+        || replacementName == null
+        || replacementName.isBlank()) {
+      return input;
+    }
+    return input.replace(rawName, replacementName);
+  }
+
   private String normalizeLegacyCodes(final String input) {
     if (input == null || input.isBlank()) {
       return "";
@@ -927,7 +1091,12 @@ public final class ChatFormatListener implements Listener {
 
   private record FilterResult(boolean blocked, String message) {}
 
-  private record DeathContext(String causeKey, String killerTypeKey, String killerName) {}
+  private record DeathContext(
+      String causeKey,
+      String killerTypeKey,
+      String killerName,
+      String killerPlayerName,
+      String killerDecoratedName) {}
 
   private String getConfiguredWorldName(final Player player) {
     final FileConfiguration config = this.plugin.getConfig();

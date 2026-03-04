@@ -386,8 +386,76 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
     if ("enable".equals(action)) {
       return handleMessageEnable(sender, args);
     }
+    if ("help".equals(action)) {
+      return handleMessageHelp(sender, label, args);
+    }
 
     sendMessageHelp(sender, label);
+    return true;
+  }
+
+  private boolean handleMessageHelp(
+      final CommandSender sender, final String label, final String[] args) {
+    final String topic = args.length >= 3 ? args[2].toLowerCase(Locale.ENGLISH) : "all";
+    if (!List.of("all", "join", "leave", "death", "advancement").contains(topic)) {
+      sender.sendMessage(
+          color("&cUnknown messages help topic. Use: join, leave, death, advancement, all"));
+      return true;
+    }
+
+    sender.sendMessage(color("&6Messages Help"));
+    sender.sendMessage(color("&7Use &f{vanilla}&7 as the full template to keep vanilla text."));
+    sender.sendMessage(color("&7Main config paths:"));
+    sender.sendMessage(color("&7  - &fmessages.<type>.enabled"));
+    sender.sendMessage(color("&7  - &fmessages.<type>.format"));
+    sender.sendMessage(color("&7  - &fmessages.<type>.disabled-players"));
+    sender.sendMessage(color("&7  - &fmessages.<type>.disabled-player-uuids"));
+    sender.sendMessage(color("&7Command shortcuts:"));
+    sender.sendMessage(color("&7  - &f/" + label + " messages set <type> format <template>"));
+    sender.sendMessage(color("&7  - &f/" + label + " messages list [type]"));
+    sender.sendMessage(color("&7  - &f/" + label + " messages clear ..."));
+
+    if ("all".equals(topic) || "join".equals(topic)) {
+      sender.sendMessage(color("&eJoin placeholders"));
+      sender.sendMessage(
+          color("&7  &f{player} {display_name} {real_player} {prefix} {world} {world_alias}"));
+      sender.sendMessage(color("&7  &f{x} {y} {z} {time} {world_time_24} {world_time_12}"));
+      sender.sendMessage(color("&7  &f{online_players} {max_players}"));
+      sender.sendMessage(color("&7  Config: &fmessages.join.per-player / per-player-uuid"));
+    }
+
+    if ("all".equals(topic) || "leave".equals(topic)) {
+      sender.sendMessage(color("&eLeave placeholders"));
+      sender.sendMessage(
+          color("&7  &f{player} {display_name} {real_player} {prefix} {world} {world_alias}"));
+      sender.sendMessage(color("&7  &f{x} {y} {z} {time} {world_time_24} {world_time_12}"));
+      sender.sendMessage(color("&7  &f{online_players} {max_players}"));
+      sender.sendMessage(color("&7  Config: &fmessages.leave.per-player / per-player-uuid"));
+    }
+
+    if ("all".equals(topic) || "death".equals(topic)) {
+      sender.sendMessage(color("&eDeath placeholders"));
+      sender.sendMessage(
+          color("&7  &f{player} {display_name} {real_player} {prefix} {world} {world_alias}"));
+      sender.sendMessage(color("&7  &f{x} {y} {z} {time} {world_time_24} {world_time_12}"));
+      sender.sendMessage(color("&7  &f{online_players} {max_players}"));
+      sender.sendMessage(color("&7  &f{death_message} {death_cause} {killer} {killer_type}"));
+      sender.sendMessage(color("&7  Config: &fmessages.death.by-cause / by-mob"));
+    }
+
+    if ("all".equals(topic) || "advancement".equals(topic)) {
+      sender.sendMessage(color("&eAdvancement placeholders"));
+      sender.sendMessage(
+          color("&7  &f{player} {display_name} {real_player} {prefix} {world} {world_alias}"));
+      sender.sendMessage(color("&7  &f{x} {y} {z} {time} {world_time_24} {world_time_12}"));
+      sender.sendMessage(color("&7  &f{online_players} {max_players}"));
+      sender.sendMessage(
+          color("&7  &f{advancement_key} {advancement_title} {advancement_message}"));
+      sender.sendMessage(color("&7  Config: &fmessages.advancement.by-key"));
+    }
+
+    sender.sendMessage(
+        color("&7PlaceholderAPI placeholders also work when enabled in config."));
     return true;
   }
 
@@ -402,8 +470,8 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
 
     if ("all".equals(target) || "join".equals(target)) {
       sender.sendMessage(
-          color("&eJoin default: &f"
-              + getConfigOrUnset(config, "messages.join.default")));
+          color("&eJoin format: &f"
+              + getMessageFormatOrUnset(config, "messages.join")));
       final ConfigurationSection section =
           config.getConfigurationSection("messages.join.per-player");
       sender.sendMessage(
@@ -412,8 +480,8 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
     }
     if ("all".equals(target) || "leave".equals(target)) {
       sender.sendMessage(
-          color("&eLeave default: &f"
-              + getConfigOrUnset(config, "messages.leave.default")));
+          color("&eLeave format: &f"
+              + getMessageFormatOrUnset(config, "messages.leave")));
       final ConfigurationSection section =
           config.getConfigurationSection("messages.leave.per-player");
       sender.sendMessage(
@@ -422,8 +490,8 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
     }
     if ("all".equals(target) || "death".equals(target)) {
       sender.sendMessage(
-          color("&eDeath default: &f"
-              + getConfigOrUnset(config, "messages.death.default")));
+          color("&eDeath format: &f"
+              + getMessageFormatOrUnset(config, "messages.death")));
       final ConfigurationSection mobSection =
           config.getConfigurationSection("messages.death.by-mob");
       sender.sendMessage(
@@ -449,8 +517,8 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
     }
     if ("all".equals(target) || "advancement".equals(target)) {
       sender.sendMessage(
-          color("&eAdvancement default: &f"
-              + getConfigOrUnset(config, "messages.advancement.default")));
+          color("&eAdvancement format: &f"
+              + getMessageFormatOrUnset(config, "messages.advancement")));
       final ConfigurationSection section =
           config.getConfigurationSection("messages.advancement.by-key");
       sender.sendMessage(
@@ -488,15 +556,15 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
 
     if ("join".equals(type) || "leave".equals(type)) {
       final String scope = args[3].toLowerCase(Locale.ENGLISH);
-      if ("default".equals(scope) || "global".equals(scope)) {
+      if ("default".equals(scope) || "global".equals(scope) || "format".equals(scope)) {
         final String template = joinArgs(args, 4);
         if (template.isBlank()) {
           sender.sendMessage(color("&cTemplate cannot be blank."));
           return true;
         }
-        config.set("messages." + type + ".default", template);
+        setMessageFormat(config, "messages." + type, template);
         this.plugin.saveConfig();
-        sender.sendMessage(color("&aUpdated " + type + " default template."));
+        sender.sendMessage(color("&aUpdated " + type + " format template."));
         return true;
       }
 
@@ -523,21 +591,21 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
         return true;
       }
 
-      sender.sendMessage(color("&cUnknown scope. Use: default|global|player"));
+      sender.sendMessage(color("&cUnknown scope. Use: format|default|global|player"));
       return true;
     }
 
     if ("death".equals(type)) {
       final String scope = args[3].toLowerCase(Locale.ENGLISH);
-      if ("default".equals(scope)) {
+      if ("default".equals(scope) || "format".equals(scope)) {
         final String template = joinArgs(args, 4);
         if (template.isBlank()) {
           sender.sendMessage(color("&cTemplate cannot be blank."));
           return true;
         }
-        config.set("messages.death.default", template);
+        setMessageFormat(config, "messages.death", template);
         this.plugin.saveConfig();
-        sender.sendMessage(color("&aUpdated death default template."));
+        sender.sendMessage(color("&aUpdated death format template."));
         return true;
       }
 
@@ -577,21 +645,21 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
         return true;
       }
 
-      sender.sendMessage(color("&cUnknown scope. Use: default|cause|mob"));
+      sender.sendMessage(color("&cUnknown scope. Use: format|default|cause|mob"));
       return true;
     }
 
     if ("advancement".equals(type)) {
       final String scope = args[3].toLowerCase(Locale.ENGLISH);
-      if ("default".equals(scope)) {
+      if ("default".equals(scope) || "format".equals(scope)) {
         final String template = joinArgs(args, 4);
         if (template.isBlank()) {
           sender.sendMessage(color("&cTemplate cannot be blank."));
           return true;
         }
-        config.set("messages.advancement.default", template);
+        setMessageFormat(config, "messages.advancement", template);
         this.plugin.saveConfig();
-        sender.sendMessage(color("&aUpdated advancement default template."));
+        sender.sendMessage(color("&aUpdated advancement format template."));
         return true;
       }
 
@@ -614,7 +682,7 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
         return true;
       }
 
-      sender.sendMessage(color("&cUnknown scope. Use: default|key"));
+      sender.sendMessage(color("&cUnknown scope. Use: format|default|key"));
       return true;
     }
 
@@ -795,7 +863,7 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
     sender.sendMessage(color("&e/" + label + " filter remove blocked <index>"));
     sender.sendMessage(color("&e/" + label + " filter remove replacement <match>"));
     sender.sendMessage(color("&e/" + label + " filter toggle <true|false>"));
-    sender.sendMessage(color("&e/" + label + " messages <list|set|clear> ..."));
+    sender.sendMessage(color("&e/" + label + " messages <help|list|set|clear> ..."));
   }
 
   private void sendFilterHelp(final CommandSender sender, final String label) {
@@ -813,15 +881,17 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
 
   private void sendMessageHelp(final CommandSender sender, final String label) {
     sender.sendMessage(
+        color("&e/" + label + " messages help [join|leave|death|advancement|all]"));
+    sender.sendMessage(
         color("&e/" + label + " messages list [join|leave|death|advancement|all]"));
-    sender.sendMessage(color("&e/" + label + " messages set join default <template>"));
+    sender.sendMessage(color("&e/" + label + " messages set join format <template>"));
     sender.sendMessage(color("&e/" + label + " messages set join player <name> <template>"));
-    sender.sendMessage(color("&e/" + label + " messages set leave default <template>"));
+    sender.sendMessage(color("&e/" + label + " messages set leave format <template>"));
     sender.sendMessage(color("&e/" + label + " messages set leave player <name> <template>"));
-    sender.sendMessage(color("&e/" + label + " messages set death default <template>"));
+    sender.sendMessage(color("&e/" + label + " messages set death format <template>"));
     sender.sendMessage(color("&e/" + label + " messages set death cause <CAUSE> <template>"));
     sender.sendMessage(color("&e/" + label + " messages set death mob <MOB> <template>"));
-    sender.sendMessage(color("&e/" + label + " messages set advancement default <template>"));
+    sender.sendMessage(color("&e/" + label + " messages set advancement format <template>"));
     sender.sendMessage(
         color("&e/" + label + " messages set advancement key <namespace:key> <template>"));
     sender.sendMessage(color("&e/" + label + " messages clear join player <name>"));
@@ -861,12 +931,25 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
     return result.toString();
   }
 
-  private String getConfigOrUnset(final FileConfiguration config, final String path) {
-    final String value = config.getString(path);
-    if (value == null || value.isBlank()) {
+  private String getMessageFormatOrUnset(final FileConfiguration config, final String basePath) {
+    final String legacyDefault = config.getString(basePath + ".default");
+    if (legacyDefault != null && !legacyDefault.isBlank()) {
+      return legacyDefault;
+    }
+
+    final String format = config.getString(basePath + ".format");
+    if (format == null || format.isBlank()) {
       return "(unset)";
     }
-    return value;
+    return format;
+  }
+
+  private void setMessageFormat(
+      final FileConfiguration config, final String basePath, final String template) {
+    config.set(basePath + ".format", template);
+    if (config.isSet(basePath + ".default")) {
+      config.set(basePath + ".default", null);
+    }
   }
 
   private String color(final String input) {
@@ -893,7 +976,14 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
 
     if (args.length == 2
         && ("messages".equalsIgnoreCase(args[0]) || "message".equalsIgnoreCase(args[0]))) {
-      return filterStartsWith(args[1], List.of("list", "set", "clear", "disable", "enable"));
+      return filterStartsWith(
+          args[1], List.of("help", "list", "set", "clear", "disable", "enable"));
+    }
+
+    if (args.length == 3
+        && ("messages".equalsIgnoreCase(args[0]) || "message".equalsIgnoreCase(args[0]))
+        && "help".equalsIgnoreCase(args[1])) {
+      return filterStartsWith(args[2], List.of("join", "leave", "death", "advancement", "all"));
     }
 
     if (args.length == 3
@@ -977,7 +1067,7 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
         && ("messages".equalsIgnoreCase(args[0]) || "message".equalsIgnoreCase(args[0]))
         && "set".equalsIgnoreCase(args[1])
         && ("join".equalsIgnoreCase(args[2]) || "leave".equalsIgnoreCase(args[2]))) {
-      return filterStartsWith(args[3], List.of("default", "global", "player"));
+      return filterStartsWith(args[3], List.of("format", "default", "global", "player"));
     }
 
     if (args.length == 4
@@ -991,14 +1081,14 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
         && ("messages".equalsIgnoreCase(args[0]) || "message".equalsIgnoreCase(args[0]))
         && ("set".equalsIgnoreCase(args[1]) || "clear".equalsIgnoreCase(args[1]))
         && "death".equalsIgnoreCase(args[2])) {
-      return filterStartsWith(args[3], List.of("default", "cause", "mob"));
+      return filterStartsWith(args[3], List.of("format", "default", "cause", "mob"));
     }
 
     if (args.length == 4
         && ("messages".equalsIgnoreCase(args[0]) || "message".equalsIgnoreCase(args[0]))
         && ("set".equalsIgnoreCase(args[1]) || "clear".equalsIgnoreCase(args[1]))
         && "advancement".equalsIgnoreCase(args[2])) {
-      return filterStartsWith(args[3], List.of("default", "key"));
+      return filterStartsWith(args[3], List.of("format", "default", "key"));
     }
 
     if (args.length == 5

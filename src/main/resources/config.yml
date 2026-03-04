@@ -101,12 +101,21 @@ chat:
   time-pattern: "h:mm:ss a"
 
 messages:
+  # If true, "{vanilla}" join/leave/death/advancement messages replace usernames
+  # with "prefix + nickname/display name" (including both players in PvP death lines).
+  # If false, vanilla system messages are left exactly as-is.
+  use-prefixed-nicknames-in-vanilla: true
+  # If true, vanilla rewritten names include prefix + nickname/display name.
+  # If false, vanilla rewritten names include nickname/display name only.
+  include-prefix-in-vanilla-names: true
+  # Message templates now use "format". Legacy "default" keys are still read.
+
   join:
     enabled: true
-    # Default join announcement.
+    # Join announcement format.
     # Placeholders: {player}, {display_name}, {world}, {x}, {y}, {z}, {time}
     # Special token: "{vanilla}" keeps the exact vanilla announcement.
-    default: "{vanilla}"
+    format: "{vanilla}"
     # Optional overrides by exact player name.
     # Example:
     # per-player:
@@ -120,10 +129,10 @@ messages:
 
   leave:
     enabled: true
-    # Default leave announcement.
+    # Leave announcement format.
     # Placeholders: {player}, {display_name}, {world}, {x}, {y}, {z}, {time}
     # Special token: "{vanilla}" keeps the exact vanilla announcement.
-    default: "{vanilla}"
+    format: "{vanilla}"
     per-player: {}
     per-player-uuid: {}
     # Suppress leave messages for specific players.
@@ -132,11 +141,11 @@ messages:
 
   death:
     enabled: true
-    # Default death message template.
+    # Death announcement format.
     # Placeholders: {player}, {death_message}, {death_cause}, {killer},
     # {killer_type}, {world}, {time}
     # Special token: "{vanilla}" keeps the exact vanilla death message.
-    default: "{vanilla}"
+    format: "{vanilla}"
     # Override by killer mob/entity type name.
     # Example keys: ZOMBIE, SKELETON, CREEPER, ENDERMAN
     # by-mob:
@@ -153,11 +162,11 @@ messages:
 
   advancement:
     enabled: true
-    # Default advancement announcement template.
+    # Advancement announcement format.
     # Placeholders: {player}, {advancement_key}, {advancement_title},
     # {advancement_message}, {world}, {time}
     # Special token: "{vanilla}" keeps the exact vanilla advancement message.
-    default: "{vanilla}"
+    format: "{vanilla}"
     # Override by advancement key (namespace:path).
     # by-key:
     #   minecraft:story/mine_stone: "&e{player} reached stone age."
