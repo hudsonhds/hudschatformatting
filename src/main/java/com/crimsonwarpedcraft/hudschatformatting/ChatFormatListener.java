@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import me.clip.placeholderapi.PlaceholderAPI;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.luckperms.api.LuckPerms;
@@ -27,6 +28,7 @@ import org.bukkit.World;
 import org.bukkit.advancement.Advancement;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -38,6 +40,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.projectiles.ProjectileSource;
 
 /**
@@ -54,6 +57,9 @@ public final class ChatFormatListener implements Listener {
   private static final String DEFAULT_LEAVE_MESSAGE = VANILLA_TEMPLATE_TOKEN;
   private static final String DEFAULT_DEATH_MESSAGE = VANILLA_TEMPLATE_TOKEN;
   private static final String DEFAULT_ADVANCEMENT_MESSAGE = VANILLA_TEMPLATE_TOKEN;
+  private static final long RECENT_EVENT_WINDOW_MS = 5000L;
+  private static final String VANILLA_JOIN_SUFFIX = " joined the game";
+  private static final String VANILLA_LEAVE_SUFFIX = " left the game";
   private static final char SECTION_SIGN = (char) 167;
   private static final String BALANCE_UNAVAILABLE = "N/A";
   private static final List<String> NICKNAME_PLACEHOLDER_CANDIDATES = List.of(
@@ -77,6 +83,12 @@ public final class ChatFormatListener implements Listener {
   private final Economy economy;
   private final boolean placeholderApiEnabled;
   private final boolean multiverseEnabled;
+  private final Map<String, Long> recentJoins = new LinkedHashMap<>();
+  private final Map<String, Long> recentLeaves = new LinkedHashMap<>();
+  private final Map<UUID, Boolean> vanishStates = new LinkedHashMap<>();
+  private java.lang.reflect.Method vanishCanSeeMethod;
+  private boolean vanishCanSeeResolved;
+  private int vanishPollTaskId = -1;
 
   /**
    * Creates a new listener.
@@ -104,6 +116,17 @@ public final class ChatFormatListener implements Listener {
     this.economy = economy;
     this.placeholderApiEnabled = placeholderApiEnabled;
     this.multiverseEnabled = multiverseEnabled;
+  }
+
+  /**
+   * Registers vanish plugin hooks for fake join/leave announcements.
+   */
+  public void registerVanishMessageHooks() {
+    disableSuperVanishFakeMessagesIfPossible();
+    registerVanishEvent("de.myzelyam.api.vanish.PlayerHideEvent", "leave");
+    registerVanishEvent("de.myzelyam.api.vanish.PlayerShowEvent", "join");
+    registerVanishEvent("de.myzelyam.api.vanish.VanishStatusChangeEvent", null);
+    startVanishStatePolling();
   }
 
   /**
@@ -152,6 +175,7 @@ public final class ChatFormatListener implements Listener {
   @EventHandler(priority = EventPriority.HIGH)
   public void onPlayerJoin(final PlayerJoinEvent event) {
     final Player player = event.getPlayer();
+    trackRecentJoin(player);
     final Component vanillaMessage = event.joinMessage();
     if (!isMessageEnabled("messages.join.enabled", true)) {
       event.joinMessage(null);
@@ -186,6 +210,8 @@ public final class ChatFormatListener implements Listener {
   @EventHandler(priority = EventPriority.HIGH)
   public void onPlayerQuit(final PlayerQuitEvent event) {
     final Player player = event.getPlayer();
+    trackRecentLeave(player);
+    clearVanishState(player);
     final Component vanillaMessage = event.quitMessage();
     if (!isMessageEnabled("messages.leave.enabled", true)) {
       event.quitMessage(null);
@@ -303,6 +329,370 @@ public final class ChatFormatListener implements Listener {
         .replace("{advancement_message}", vanillaMessage)
         .replace("{advancement_title}", getAdvancementTitle(event));
     event.message(AMPERSAND_SERIALIZER.deserialize(rendered));
+  }
+
+  /**
+   * Rewrites vanilla-looking broadcast join/leave messages (fake vanish messages).
+   *
+   * @param event the broadcast event
+   */
+  @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+  public void onBroadcastMessage(final org.bukkit.event.server.BroadcastMessageEvent event) {
+    final Component baseMessage = event.message();
+    final String plainText = PLAIN_TEXT_SERIALIZER.serialize(baseMessage).trim();
+    if (plainText.isBlank()) {
+      return;
+    }
+
+    final VanillaBroadcast broadcast = parseVanillaJoinLeave(plainText);
+    if (broadcast == null) {
+      return;
+    }
+    if (isRecentBroadcast(broadcast)) {
+      return;
+    }
+
+    final Player player = findOnlinePlayerByName(broadcast.playerName());
+    if (player == null) {
+      return;
+    }
+
+    final String type = broadcast.type();
+    if (!isMessageEnabled("messages." + type + ".enabled", true)) {
+      event.setCancelled(true);
+      return;
+    }
+    if (shouldSuppressPlayerMessage(type, player, true)) {
+      event.setCancelled(true);
+      return;
+    }
+
+    final String fallback = switch (type) {
+      case "join" -> DEFAULT_JOIN_MESSAGE;
+      case "leave" -> DEFAULT_LEAVE_MESSAGE;
+      default -> DEFAULT_JOIN_MESSAGE;
+    };
+    final String template = getJoinOrLeaveTemplate(player, type, fallback);
+    if (isVanillaTemplate(template)) {
+      if (!usePrefixedNicknamesInVanillaMessages()) {
+        return;
+      }
+      event.message(rewriteVanillaMessage(
+          baseMessage, Map.of(player.getName(), getVanillaFormattedName(player))));
+      return;
+    }
+
+    final String rendered = applyGeneralPlaceholders(player, template, "")
+        .replace("{event}", type);
+    event.message(AMPERSAND_SERIALIZER.deserialize(rendered));
+  }
+
+  private void registerVanishEvent(final String className, final String fixedType) {
+    final Class<? extends Event> eventClass = resolveEventClass(className);
+    if (eventClass == null) {
+      return;
+    }
+
+    this.plugin.getServer().getPluginManager().registerEvent(
+        eventClass,
+        this,
+        EventPriority.HIGH,
+        (listener, event) -> handleVanishEvent(event, fixedType),
+        this.plugin,
+        true);
+  }
+
+  @SuppressWarnings("unchecked")
+  private Class<? extends Event> resolveEventClass(final String className) {
+    try {
+      final Class<?> raw = Class.forName(className);
+      if (!Event.class.isAssignableFrom(raw)) {
+        return null;
+      }
+      return (Class<? extends Event>) raw;
+    } catch (ClassNotFoundException ex) {
+      return null;
+    }
+  }
+
+  private void handleVanishEvent(final Event event, final String fixedType) {
+    final Player player = getPlayerFromEvent(event);
+    if (player == null) {
+      return;
+    }
+
+    final String type = fixedType == null ? resolveVanishType(event) : fixedType;
+    if (type == null) {
+      return;
+    }
+
+    suppressVanishEventMessages(event);
+    updateVanishState(player, "leave".equals(type));
+    sendVanishJoinLeaveMessage(player, type);
+  }
+
+  private Player getPlayerFromEvent(final Event event) {
+    if (event == null) {
+      return null;
+    }
+    try {
+      final java.lang.reflect.Method getPlayer = event.getClass().getMethod("getPlayer");
+      final Object value = getPlayer.invoke(event);
+      return value instanceof Player ? (Player) value : null;
+    } catch (ReflectiveOperationException ex) {
+      return null;
+    }
+  }
+
+  private String resolveVanishType(final Event event) {
+    final boolean vanished = invokeBooleanGetter(event, "isVanished");
+    if (vanished) {
+      return "leave";
+    }
+
+    final boolean vanishing = invokeBooleanGetter(event, "isVanishing");
+    if (vanishing) {
+      return "leave";
+    }
+
+    final boolean invisible = invokeBooleanGetter(event, "isInvisible");
+    if (invisible) {
+      return "leave";
+    }
+
+    if (hasMethod(event, "isVanished") || hasMethod(event, "isVanishing")
+        || hasMethod(event, "isInvisible")) {
+      return "join";
+    }
+
+    final String simpleName = event.getClass().getSimpleName().toLowerCase(Locale.ENGLISH);
+    if (simpleName.contains("hide") || simpleName.contains("vanish")) {
+      return "leave";
+    }
+    if (simpleName.contains("show") || simpleName.contains("reappear")) {
+      return "join";
+    }
+    return null;
+  }
+
+  private boolean invokeBooleanGetter(final Object target, final String methodName) {
+    if (target == null) {
+      return false;
+    }
+    try {
+      final java.lang.reflect.Method method = target.getClass().getMethod(methodName);
+      final Object value = method.invoke(target);
+      return value instanceof Boolean && (Boolean) value;
+    } catch (ReflectiveOperationException ex) {
+      return false;
+    }
+  }
+
+  private boolean hasMethod(final Object target, final String methodName) {
+    if (target == null) {
+      return false;
+    }
+    try {
+      target.getClass().getMethod(methodName);
+      return true;
+    } catch (ReflectiveOperationException ex) {
+      return false;
+    }
+  }
+
+  private void suppressVanishEventMessages(final Event event) {
+    invokeBooleanSetter(event, "setSilent", true);
+    invokeBooleanSetter(event, "setSendMessage", false);
+    invokeBooleanSetter(event, "setBroadcast", false);
+    invokeBooleanSetter(event, "setAnnounce", false);
+  }
+
+  private void invokeBooleanSetter(
+      final Object target, final String methodName, final boolean value) {
+    if (target == null) {
+      return;
+    }
+    try {
+      final java.lang.reflect.Method method =
+          target.getClass().getMethod(methodName, boolean.class);
+      method.invoke(target, value);
+    } catch (ReflectiveOperationException ex) {
+      // Ignore missing setters from specific vanish APIs.
+    }
+  }
+
+  private void sendVanishJoinLeaveMessage(final Player player, final String type) {
+    if (!isMessageEnabled("messages." + type + ".enabled", true)) {
+      return;
+    }
+    if (shouldSuppressPlayerMessage(type, player, true)) {
+      return;
+    }
+
+    final Component vanillaMessage = createVanillaJoinLeaveComponent(player, type);
+    final Component rendered = buildJoinLeaveComponent(player, type, vanillaMessage);
+    if (rendered == null) {
+      return;
+    }
+
+    if ("join".equals(type)) {
+      markRecent(recentJoins, player.getName());
+    } else if ("leave".equals(type)) {
+      markRecent(recentLeaves, player.getName());
+    }
+    sendVanishMessageToRecipients(player, rendered);
+  }
+
+  private Component buildJoinLeaveComponent(
+      final Player player,
+      final String type,
+      final Component vanillaMessage) {
+    final String template = getJoinOrLeaveTemplate(player, type, DEFAULT_JOIN_MESSAGE);
+    if (isVanillaTemplate(template)) {
+      if (!usePrefixedNicknamesInVanillaMessages()) {
+        return vanillaMessage;
+      }
+      return rewriteVanillaMessage(
+          vanillaMessage, Map.of(player.getName(), getVanillaFormattedName(player)));
+    }
+
+    final String rendered = applyGeneralPlaceholders(player, template, "")
+        .replace("{event}", type);
+    return AMPERSAND_SERIALIZER.deserialize(rendered);
+  }
+
+  private Component createVanillaJoinLeaveComponent(final Player player, final String type) {
+    final String suffix = "join".equals(type) ? VANILLA_JOIN_SUFFIX : VANILLA_LEAVE_SUFFIX;
+    return Component.text(player.getName() + suffix, NamedTextColor.YELLOW);
+  }
+
+  private void sendVanishMessageToRecipients(
+      final Player vanishedPlayer, final Component message) {
+    for (final Player viewer : this.plugin.getServer().getOnlinePlayers()) {
+      if (viewer.equals(vanishedPlayer)) {
+        continue;
+      }
+      viewer.sendMessage(message);
+    }
+  }
+
+  private boolean isVanishCanSeeAvailable() {
+    if (this.vanishCanSeeResolved) {
+      return this.vanishCanSeeMethod != null;
+    }
+    this.vanishCanSeeResolved = true;
+
+    try {
+      final Class<?> vanishApi = Class.forName("de.myzelyam.api.vanish.VanishAPI");
+      this.vanishCanSeeMethod =
+          vanishApi.getMethod("canSee", Player.class, Player.class);
+    } catch (ReflectiveOperationException ex) {
+      this.vanishCanSeeMethod = null;
+    }
+    return this.vanishCanSeeMethod != null;
+  }
+
+  private boolean canSeeViaVanishApi(final Player viewer, final Player vanishedPlayer) {
+    if (!isVanishCanSeeAvailable()) {
+      return true;
+    }
+    try {
+      final Object result = this.vanishCanSeeMethod.invoke(null, viewer, vanishedPlayer);
+      return result instanceof Boolean && (Boolean) result;
+    } catch (ReflectiveOperationException ex) {
+      return true;
+    }
+  }
+
+  private void disableSuperVanishFakeMessagesIfPossible() {
+    if (!isPluginEnabled("SuperVanish") && !isPluginEnabled("PremiumVanish")) {
+      return;
+    }
+
+    final FileConfiguration config = getSuperVanishConfig();
+    if (config == null) {
+      return;
+    }
+
+    boolean changed = false;
+    changed |= setConfigIfPresent(
+        config, "Messages.VanishReappearMessages.BroadcastMessageOnVanish", false);
+    changed |= setConfigIfPresent(
+        config, "Messages.VanishReappearMessages.BroadcastMessageOnReappear", false);
+    changed |= setConfigIfPresent(
+        config, "Messages.VanishReappearMessages.BroadcastFakeQuitOnVanish", false);
+    changed |= setConfigIfPresent(
+        config, "Messages.VanishReappearMessages.BroadcastFakeJoinOnReappear", false);
+    changed |= setConfigIfPresent(
+        config, "VanishReappearMessages.BroadcastMessageOnVanish", false);
+    changed |= setConfigIfPresent(
+        config, "VanishReappearMessages.BroadcastMessageOnReappear", false);
+
+    if (!changed) {
+      return;
+    }
+
+    saveSuperVanishConfig();
+  }
+
+  private FileConfiguration getSuperVanishConfig() {
+    final FileConfiguration config = tryGetSuperVanishConfig("de.myzelyam.api.vanish.SVAPI");
+    if (config != null) {
+      return config;
+    }
+    return tryGetSuperVanishConfig("de.myzelyam.api.vanish.VanishAPI");
+  }
+
+  private FileConfiguration tryGetSuperVanishConfig(final String className) {
+    try {
+      final Class<?> api = Class.forName(className);
+      final java.lang.reflect.Method method = api.getMethod("getConfiguration");
+      final Object result = method.invoke(null);
+      return result instanceof FileConfiguration ? (FileConfiguration) result : null;
+    } catch (ReflectiveOperationException ex) {
+      return null;
+    }
+  }
+
+  private boolean setConfigIfPresent(
+      final FileConfiguration config, final String path, final boolean value) {
+    if (!config.contains(path)) {
+      return false;
+    }
+    final boolean current = config.getBoolean(path);
+    if (current == value) {
+      return false;
+    }
+    config.set(path, value);
+    return true;
+  }
+
+  private void saveSuperVanishConfig() {
+    final Plugin superVanish = this.plugin.getServer().getPluginManager()
+        .getPlugin("SuperVanish");
+    final Plugin premiumVanish = this.plugin.getServer().getPluginManager()
+        .getPlugin("PremiumVanish");
+    final Plugin target = superVanish != null ? superVanish : premiumVanish;
+    if (target instanceof JavaPlugin javaPlugin) {
+      javaPlugin.saveConfig();
+    }
+
+    reloadSuperVanishConfig("de.myzelyam.api.vanish.SVAPI");
+    reloadSuperVanishConfig("de.myzelyam.api.vanish.VanishAPI");
+  }
+
+  private void reloadSuperVanishConfig(final String className) {
+    try {
+      final Class<?> api = Class.forName(className);
+      final java.lang.reflect.Method method = api.getMethod("reloadConfig");
+      method.invoke(null);
+    } catch (ReflectiveOperationException ex) {
+      // Ignore if API does not expose reloadConfig.
+    }
+  }
+
+  private boolean isPluginEnabled(final String pluginName) {
+    return this.plugin.getServer().getPluginManager().isPluginEnabled(pluginName);
   }
 
   private Component buildPlayerMessage(
@@ -684,7 +1074,12 @@ public final class ChatFormatListener implements Listener {
   }
 
   private boolean shouldSuppressPlayerMessage(final String type, final Player player) {
-    if (isPlayerVanished(player)) {
+    return shouldSuppressPlayerMessage(type, player, false);
+  }
+
+  private boolean shouldSuppressPlayerMessage(
+      final String type, final Player player, final boolean ignoreVanish) {
+    if (!ignoreVanish && isPlayerVanished(player)) {
       return true;
     }
 
@@ -701,15 +1096,158 @@ public final class ChatFormatListener implements Listener {
     return containsIgnoreCase(disabledUuids, uuid);
   }
 
+  private void trackRecentJoin(final Player player) {
+    markRecent(recentJoins, player.getName());
+    recentLeaves.remove(player.getName().toLowerCase(Locale.ENGLISH));
+  }
+
+  private void trackRecentLeave(final Player player) {
+    markRecent(recentLeaves, player.getName());
+    recentJoins.remove(player.getName().toLowerCase(Locale.ENGLISH));
+  }
+
+  private void markRecent(final Map<String, Long> map, final String name) {
+    if (name == null || name.isBlank()) {
+      return;
+    }
+    pruneOldEntries(map);
+    map.put(name.toLowerCase(Locale.ENGLISH), System.currentTimeMillis());
+  }
+
+  private void startVanishStatePolling() {
+    if (this.vanishPollTaskId != -1) {
+      return;
+    }
+    this.vanishPollTaskId = this.plugin.getServer().getScheduler().scheduleSyncRepeatingTask(
+        this.plugin,
+        this::pollVanishStates,
+        40L,
+        20L);
+  }
+
+  private void pollVanishStates() {
+    final boolean debug = isVanishDebugEnabled();
+    for (final Player player : this.plugin.getServer().getOnlinePlayers()) {
+      final boolean vanished = isPlayerVanished(player);
+      final UUID uuid = player.getUniqueId();
+      final Boolean previous = this.vanishStates.get(uuid);
+      this.vanishStates.put(uuid, vanished);
+      if (previous == null || previous == vanished) {
+        if (debug && previous != null) {
+          this.plugin.getLogger().info(
+              "[VanishDebug] " + player.getName() + " unchanged vanished=" + vanished);
+        }
+        continue;
+      }
+      if (debug) {
+        this.plugin.getLogger().info(
+            "[VanishDebug] " + player.getName() + " changed vanished=" + previous
+                + " -> " + vanished);
+      }
+      final String type = vanished ? "leave" : "join";
+      sendVanishJoinLeaveMessage(player, type);
+    }
+
+    if (!this.vanishStates.isEmpty()) {
+      this.vanishStates.keySet().removeIf(
+          uuid -> this.plugin.getServer().getPlayer(uuid) == null);
+    }
+  }
+
+  private void updateVanishState(final Player player, final boolean vanished) {
+    if (player == null) {
+      return;
+    }
+    this.vanishStates.put(player.getUniqueId(), vanished);
+  }
+
+  private void clearVanishState(final Player player) {
+    if (player == null) {
+      return;
+    }
+    this.vanishStates.remove(player.getUniqueId());
+  }
+
+  private boolean isRecentBroadcast(final VanillaBroadcast broadcast) {
+    pruneOldEntries(recentJoins);
+    pruneOldEntries(recentLeaves);
+    final String key = broadcast.playerName().toLowerCase(Locale.ENGLISH);
+    if ("join".equals(broadcast.type())) {
+      return recentJoins.containsKey(key);
+    }
+    if ("leave".equals(broadcast.type())) {
+      return recentLeaves.containsKey(key);
+    }
+    return false;
+  }
+
+  private void pruneOldEntries(final Map<String, Long> map) {
+    if (map.isEmpty()) {
+      return;
+    }
+    final long cutoff = System.currentTimeMillis() - RECENT_EVENT_WINDOW_MS;
+    map.entrySet().removeIf(entry -> entry.getValue() < cutoff);
+  }
+
+  private VanillaBroadcast parseVanillaJoinLeave(final String message) {
+    if (message == null || message.isBlank()) {
+      return null;
+    }
+    final String trimmed = message.trim();
+    if (trimmed.endsWith(VANILLA_JOIN_SUFFIX)) {
+      final String name = trimmed.substring(
+          0, trimmed.length() - VANILLA_JOIN_SUFFIX.length()).trim();
+      if (!name.isBlank()) {
+        return new VanillaBroadcast("join", name);
+      }
+    }
+    if (trimmed.endsWith(VANILLA_LEAVE_SUFFIX)) {
+      final String name = trimmed.substring(
+          0, trimmed.length() - VANILLA_LEAVE_SUFFIX.length()).trim();
+      if (!name.isBlank()) {
+        return new VanillaBroadcast("leave", name);
+      }
+    }
+    return null;
+  }
+
+  private Player findOnlinePlayerByName(final String name) {
+    if (name == null || name.isBlank()) {
+      return null;
+    }
+    final Player exact = this.plugin.getServer().getPlayerExact(name);
+    if (exact != null) {
+      return exact;
+    }
+    final String candidate = name.trim();
+    for (final Player player : this.plugin.getServer().getOnlinePlayers()) {
+      if (player.getName().equalsIgnoreCase(candidate)) {
+        return player;
+      }
+    }
+    for (final Player player : this.plugin.getServer().getOnlinePlayers()) {
+      if (containsIgnoreCase(candidate, player.getName())) {
+        return player;
+      }
+      final String displayName = PLAIN_TEXT_SERIALIZER.serialize(player.displayName());
+      if (!displayName.isBlank() && containsIgnoreCase(candidate, displayName)) {
+        return player;
+      }
+    }
+    return null;
+  }
+
   private boolean isPlayerVanished(final Player player) {
     if (!this.plugin.getConfig().getBoolean("integrations.vanish.hide-messages", true)) {
       return false;
     }
 
     if (isVanishedViaSuperVanishApi(player)) {
+      logVanishDebug(player, "SuperVanishAPI", true);
       return true;
     }
     if (isVanishedViaEssentials(player)) {
+      logVanishDebug(player, "Essentials", true);
       return true;
     }
 
@@ -726,11 +1264,25 @@ public final class ChatFormatListener implements Listener {
 
       for (final MetadataValue value : player.getMetadata(key)) {
         if (value.asBoolean()) {
+          logVanishDebug(player, "Metadata:" + key, true);
           return true;
         }
       }
     }
+    logVanishDebug(player, "none", false);
     return false;
+  }
+
+  private boolean isVanishDebugEnabled() {
+    return this.plugin.getConfig().getBoolean("integrations.vanish.debug", false);
+  }
+
+  private void logVanishDebug(final Player player, final String source, final boolean vanished) {
+    if (!isVanishDebugEnabled()) {
+      return;
+    }
+    this.plugin.getLogger().info(
+        "[VanishDebug] " + player.getName() + " source=" + source + " vanished=" + vanished);
   }
 
   private boolean isVanishedViaSuperVanishApi(final Player player) {
@@ -785,6 +1337,13 @@ public final class ChatFormatListener implements Listener {
     } catch (ReflectiveOperationException ex) {
       return false;
     }
+  }
+
+  private boolean containsIgnoreCase(final String haystack, final String needle) {
+    if (haystack == null || needle == null) {
+      return false;
+    }
+    return haystack.toLowerCase(Locale.ENGLISH).contains(needle.toLowerCase(Locale.ENGLISH));
   }
 
   private boolean containsIgnoreCase(final List<String> list, final String value) {
@@ -1097,6 +1656,8 @@ public final class ChatFormatListener implements Listener {
       String killerName,
       String killerPlayerName,
       String killerDecoratedName) {}
+
+  private record VanillaBroadcast(String type, String playerName) {}
 
   private String getConfiguredWorldName(final Player player) {
     final FileConfiguration config = this.plugin.getConfig();

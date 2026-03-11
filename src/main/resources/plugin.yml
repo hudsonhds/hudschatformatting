@@ -20,6 +20,9 @@ commands:
     usage: /<command> [reload|filter|messages]
     aliases:
       - hcf
+  speak:
+    description: Speak as another player.
+    usage: /<command> <player|all|random> <message>
 permissions:
   hudschatformatting.chat.color:
     description: Allows use of & color codes in chat.
@@ -78,3 +81,6 @@ permissions:
   hudschatformatting.admin.messages.enable:
     description: Re-enables message broadcasts for specific players.
     default: false
+  hudschatformatting.speak:
+    description: Allows speaking as another player.
+    default: op

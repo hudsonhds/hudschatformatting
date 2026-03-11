@@ -45,26 +45,35 @@ public class HudsChatFormattingPlugin extends JavaPlugin {
     saveDefaultConfig();
     final int addedDefaults = mergeMissingConfigDefaults();
     persistMergedConfigIfNeeded(addedDefaults, true);
-    getServer().getPluginManager().registerEvents(
-        new ChatFormatListener(
-            this,
-            getLuckPerms(),
-            getVaultChat(),
-            getVaultEconomy(),
-            this.placeholderApiEnabled,
-            this.multiverseEnabled),
-        this);
+    final ChatFormatListener listener = new ChatFormatListener(
+        this,
+        getLuckPerms(),
+        getVaultChat(),
+        getVaultEconomy(),
+        this.placeholderApiEnabled,
+        this.multiverseEnabled);
+    getServer().getPluginManager().registerEvents(listener, this);
+    listener.registerVanishMessageHooks();
     registerCommands();
   }
 
   private void registerCommands() {
+    final SpeakCommand speakCommand = new SpeakCommand(this);
+    final PluginCommand speak = getCommand("speak");
+    if (speak != null) {
+      speak.setExecutor(speakCommand);
+      speak.setTabCompleter(speakCommand);
+    } else {
+      getLogger().warning("Command 'speak' is not defined in plugin.yml.");
+    }
+
     final PluginCommand command = getCommand("hudschatformatting");
     if (command == null) {
       getLogger().warning("Command 'hudschatformatting' is not defined in plugin.yml.");
       return;
     }
 
-    final ChatFormattingAdminCommand executor = new ChatFormattingAdminCommand(this);
+    final ChatFormattingAdminCommand executor = new ChatFormattingAdminCommand(this, speakCommand);
     command.setExecutor(executor);
     command.setTabCompleter(executor);
   }

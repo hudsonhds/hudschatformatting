@@ -40,6 +40,7 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
       "hudschatformatting.admin.messages.enable";
 
   private final HudsChatFormattingPlugin plugin;
+  private final SpeakCommand speakCommand;
 
   /**
    * Creates a command executor for managing plugin config values at runtime.
@@ -49,8 +50,10 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
   @SuppressFBWarnings(
       value = "EI_EXPOSE_REP2",
       justification = "Command executors keep a plugin reference for config and logger access.")
-  public ChatFormattingAdminCommand(final HudsChatFormattingPlugin plugin) {
+  public ChatFormattingAdminCommand(
+      final HudsChatFormattingPlugin plugin, final SpeakCommand speakCommand) {
     this.plugin = plugin;
+    this.speakCommand = speakCommand;
   }
 
   @Override
@@ -59,17 +62,25 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
       final Command command,
       final String label,
       final String[] args) {
-    if (!hasAdminAccess(sender)) {
-      sender.sendMessage(color("&cYou do not have permission to use this command."));
-      return true;
-    }
-
     if (args.length == 0) {
+      if (!hasAdminAccess(sender)) {
+        sender.sendMessage(color("&cYou do not have permission to use this command."));
+        return true;
+      }
       sendHelp(sender, label);
       return true;
     }
 
     final String sub = args[0].toLowerCase(Locale.ENGLISH);
+    if ("speak".equals(sub)) {
+      return this.speakCommand.handleSpeak(sender, label, args, 1);
+    }
+
+    if (!hasAdminAccess(sender)) {
+      sender.sendMessage(color("&cYou do not have permission to use this command."));
+      return true;
+    }
+
     if ("reload".equals(sub)) {
       return handleReload(sender);
     }
@@ -963,11 +974,36 @@ public final class ChatFormattingAdminCommand implements TabExecutor {
       final String alias,
       final String[] args) {
     if (!hasAdminAccess(sender)) {
-      return Collections.emptyList();
+      if (!this.speakCommand.canUse(sender)) {
+        return Collections.emptyList();
+      }
     }
 
     if (args.length == 1) {
-      return filterStartsWith(args[0], List.of("reload", "filter", "messages"));
+      final List<String> roots = new ArrayList<>();
+      if (hasAdminAccess(sender)) {
+        roots.add("reload");
+        roots.add("filter");
+        roots.add("messages");
+      }
+      if (this.speakCommand.canUse(sender)) {
+        roots.add("speak");
+      }
+      return filterStartsWith(args[0], roots);
+    }
+
+    if ("speak".equalsIgnoreCase(args[0])) {
+      if (!this.speakCommand.canUse(sender)) {
+        return Collections.emptyList();
+      }
+      if (args.length == 2) {
+        return filterStartsWith(args[1], this.speakCommand.getTargetSuggestions());
+      }
+      return Collections.emptyList();
+    }
+
+    if (!hasAdminAccess(sender)) {
+      return Collections.emptyList();
     }
 
     if (args.length == 2 && "filter".equalsIgnoreCase(args[0])) {

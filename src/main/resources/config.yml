@@ -179,6 +179,8 @@ integrations:
   vanish:
     # If true, join/leave/death/advancement messages are hidden for vanished players.
     hide-messages: true
+    # Enable debug logging for vanish detection and state changes.
+    debug: false
     # Metadata fallback for vanish plugins without a public API.
     metadata-keys:
       - "vanished"
